@@ -1,0 +1,260 @@
+#!/bin/bash
+SCRIPT_VERSION=0.02
+
+# WORKDIR="/home/opensrf/develop/evergreen2/current"
+# use current directory
+WORKDIR="$(dirname $(readlink -f -- $0))"
+echo;echo "WORKDIR is: $WORKDIR"
+echo
+#WORKDIR=`pwd`
+if [ ! -z $1 ]; then
+	VERSION=$1
+else
+VERSION="2.3.4"
+fi
+echo $VERSION
+# Customized files need to build the package.
+BUILDFILESDIR="${WORKDIR}/files_for_build"
+
+PKGFILE="Evergreen-ILS-$VERSION.tar.gz"
+PKGNAME="Evergreen-ILS-$VERSION"
+NEWPKGFILE="evergreen-ils-$VERSION.tar.gz"
+NEWPKGNAME="evergreen-ils-$VERSION"
+EG_CUSTOMIZATIONS_FILE="$WORKDIR/files_for_build/customized/evergreen_customizations.tar.gz"
+BUILD_TYPE_FILE="Last_Build_Type.txt"
+
+echo;echo "customizations file is: $EG_CUSTOMIZATIONS_FILE"
+sleep 3
+
+EVERGREEN_PREFIX="/openils"
+#ORIG_FOLDER="/home/opensrf/develop/evergreen2/"
+ORIG_PKGFILE="/root/develop/deb-builder/evergreen-unified/${PKGFILE}"
+SOURCE_FOLDER="${WORKDIR}/${NEWPKGNAME}"
+DEST_ROOT="${SOURCE_FOLDER}/debian/evergreen-ils"
+if [ "$BUILDTYPE" = "Cluster" ]
+then
+	export DEBEMAIL="$(grep @ ${BUILDFILESDIR}/control|awk -F"[<>]" '{ print $2 }')"
+	export DEBFULLNAME="$(grep @ ${BUILDFILESDIR}/control|awk -F"[<>:]" '{ print $2 }')"
+else
+	export DEBEMAIL="$(grep @ ${BUILDFILESDIR}/control-cluster|awk -F"[<>]" '{ print $2 }')"
+	export DEBFULLNAME="$(grep @ ${BUILDFILESDIR}/control-cluster|awk -F"[<>:]" '{ print $2 }')"
+fi
+
+echo
+echo "Select the build type"
+select BUILDTYPE in Standalone Cluster
+        do
+	case $BUILDTYPE in
+		Standalone ) echo You selected $BUILDTYPE; echo; sleep 1; break ;;
+		Cluster ) echo You selected $BUILDTYPE; echo; sleep 1; break ;;
+		* ) echo; echo "You must select 1 or 2";;
+	esac
+done
+echo Building $BUILDTYPE version..;echo
+
+echo
+echo "Select build with TPAC or OPAC enabled."
+select PAC in TPAC OPAC
+        do
+        case $PAC in
+                TPAC ) echo You selected $PAC; echo; sleep 1; break ;;
+                OPAC ) echo You selected $PAC; echo; sleep 1; break ;;
+                * ) echo; echo "You must select 1 or 2";;
+        esac
+done
+echo Building with $PAC enabled.;echo
+#WHY U BREAK STUFF?!?!
+#exit
+
+
+cd $WORKDIR
+
+if [ ! -e "$ORIG_PKGFILE" ]
+        then
+        echo "$ORIG_PKGFILE not found exiting..."
+        echo
+        exit 1
+fi
+
+if [ "$1" = "b" ] || [ "$1" = "-b" ]
+        then
+        echo
+        echo "Not including Source"
+        echo
+        BuildPackage () {
+        echo
+        echo "Running dpkg-build-package -b -nc"
+        sleep 1
+        dpkg-buildpackage -b -nc
+        }
+                else
+                BuildPackage () {
+                echo
+                echo "Running dpkg-build-package -F"
+                sleep 1
+                dpkg-buildpackage -F -nc
+                }
+fi
+
+## currently we are simply deleting and recreating everything here.
+
+rm -f ${WORKDIR}/*.changes
+rm -f ${WORKDIR}/*.dsc
+rm -f ${WORKDIR}/*.deb
+rm -f ${WORKDIR}/*.gz && echo "Removed old package files"
+rm -rf $SOURCE_FOLDER && echo "Removed $SOURCE_FOLDER" && \
+sleep 1 && \
+echo ">>>Untarring: ${PKGNAME}"
+tar zxf ${ORIG_PKGFILE} -C ${WORKDIR} && \
+mv ${WORKDIR}/${PKGNAME} ${WORKDIR}/${NEWPKGNAME}
+#TODO
+#Extract customizations here
+
+if [ -e $EG_CUSTOMIZATIONS_FILE ]
+then
+	tar zxvf $EG_CUSTOMIZATIONS_FILE
+	echo "Customized: YES" >> $BUILD_TYPE_FILE
+else
+	echo;echo "No Customizations found.."
+	echo "Building stock Evergreen"
+	read -p "Press [Enter] to continue" PAUSE
+fi
+
+cp -f ${ORIG_PKGFILE} ${WORKDIR}/${NEWPKGFILE} && \
+cd $SOURCE_FOLDER && \
+echo "Running dh_make on $NEWPKGFILE" && \
+sleep 1 && \
+dh_make -s -n
+echo "Restoring rules file." && \
+sleep 2 && \
+mkdir -p ${SOURCE_FOLDER}/DEBIAN/evergreen-ils/etc/init.d && \
+mkdir -p ${SOURCE_FOLDER}/debian/evergreen-ils/etc/init.d && \
+
+# copy our modified files to the debian folder in the source folder.
+cp ${BUILDFILESDIR}/rules ${SOURCE_FOLDER}/debian/rules 
+if [ "$BUILDTYPE" = "Cluster" ]
+then
+        cp ${BUILDFILESDIR}/control-cluster ${SOURCE_FOLDER}/debian/control
+        cp ${BUILDFILESDIR}/CONTROL-cluster ${SOURCE_FOLDER}/DEBIAN/control
+else
+	cp ${BUILDFILESDIR}/control ${SOURCE_FOLDER}/debian/control 
+	cp ${BUILDFILESDIR}/CONTROL ${SOURCE_FOLDER}/DEBIAN/control 
+fi
+cp ${BUILDFILESDIR}/config ${SOURCE_FOLDER}/debian/config 
+cp ${BUILDFILESDIR}/config ${SOURCE_FOLDER}/DEBIAN/config 
+cp ${BUILDFILESDIR}/postinst ${SOURCE_FOLDER}/debian/postinst 
+cp ${BUILDFILESDIR}/postinst ${SOURCE_FOLDER}/DEBIAN/postinst 
+cp ${BUILDFILESDIR}/postrm ${SOURCE_FOLDER}/debian/postrm 
+cp ${BUILDFILESDIR}/postrm ${SOURCE_FOLDER}/DEBIAN/postrm 
+cp ${BUILDFILESDIR}/templates ${SOURCE_FOLDER}/debian/templates 
+cp ${BUILDFILESDIR}/templates ${SOURCE_FOLDER}/DEBIAN/templates 
+
+if [ "$BUILDTYPE" = "Cluster" ]
+        then
+	echo "Build Date: $(date)" > $WORKDIR/$BUILD_TYPE_FILE
+	echo "Build Type: $BUILDTYPE" >> $WORKDIR/$BUILD_TYPE_FILE
+        sed -i 's/^STANDALONE=1 #/STANDALONE=0 #/g' ${SOURCE_FOLDER}/debian/postinst
+		else
+		echo "Build Date: $(date)" > $WORKDIR/$BUILD_TYPE_FILE
+		echo "Build Type: $BUILDTYPE" >> $WORKDIR/$BUILD_TYPE_FILE
+fi
+
+if [ "$PAC" = "TPAC" ]
+	then
+	sed -i 's/^PAC=OPAC/PAC=TPAC/g' ${SOURCE_FOLDER}/debian/postinst
+fi
+
+
+############### Standard build failed because some components were being installed into build system  ###########
+############### intead of destination target ${SOURCE_FOLDER}/debian/evergreen-ils/openils ######################
+echo && \
+## Standard build failed due mixing of paths . 
+sed -i 's^$(perldir)^$(DESTDIR)$(perldir)^g'  ${SOURCE_FOLDER}/Open-ILS/src/Makefile.am
+sed -i 's^$(perldir)^$(DESTDIR)$(perldir)^g'  ${SOURCE_FOLDER}/Open-ILS/src/Makefile.in
+
+
+sed -i 's^reportsdir = $(DESTDIR)$(WEBDIR)/reports^reportsdir = $(WEBDIR)/reports^g' ${SOURCE_FOLDER}/Open-ILS/web/Makefile.in
+sed -i 's^reportsdir = $(DESTDIR)$(WEBDIR)/reports^reportsdir = $(WEBDIR)/reports^g' ${SOURCE_FOLDER}/Open-ILS/web/Makefile.am
+
+
+
+#for building the staff client, wants to install it in /openils/var/web/xul on the *build* system
+
+#first off, someone used {} instead of () for 1 instance of WEBDIR
+#sed -i 's^${WEBDIR}^$(WEBDIR)^g' ${SOURCE_FOLDER}/Open-ILS/xul/staff_client/Makefile.in
+#sed -i 's^${WEBDIR}^$(WEBDIR)^g' ${SOURCE_FOLDER}/Open-ILS/xul/staff_client/Makefile.am
+#now fix the path
+#sed -i 's^$(WEBDIR)^$(DESTDIR)$(WEBDIR)^g' ${SOURCE_FOLDER}/Open-ILS/xul/staff_client/Makefile.in
+#sed -i 's^$(WEBDIR)^$(DESTDIR)$(WEBDIR)^g' ${SOURCE_FOLDER}/Open-ILS/xul/staff_client/Makefile.am
+
+
+sed -i 's/$(DESTDIR)$(oilsincludedir)/$(oilsincludedir)/g' ${SOURCE_FOLDER}/Open-ILS/src/Makefile.am
+sed -i 's/$(DESTDIR)$(oilsincludedir)/$(oilsincludedir)/g' ${SOURCE_FOLDER}/Open-ILS/src/Makefile.in
+
+#####################################################################################################################
+#####################################################################################################################
+
+#Debian doesn't like having the same files provided by multiple packages. Rename the example files provided by evergreen that conflict with opensrf.
+sed -i 's/opensrf.xml.example/opensrf.xml.evergreen.example/g' ${SOURCE_FOLDER}/Open-ILS/src/Makefile.in
+sed -i 's/opensrf.xml.example/opensrf.xml.evergreen.example/g' ${SOURCE_FOLDER}/Open-ILS/src/Makefile.am
+sed -i 's/opensrf_core.xml.example/opensrf_core.xml.evergreen.example/g' ${SOURCE_FOLDER}/Open-ILS/src/Makefile.in
+sed -i 's/opensrf_core.xml.example/opensrf_core.xml.evergreen.example/g' ${SOURCE_FOLDER}/Open-ILS/src/Makefile.am
+mv ${SOURCE_FOLDER}/Open-ILS/examples/opensrf.xml.example ${SOURCE_FOLDER}/Open-ILS/examples/opensrf.xml.evergreen.example
+mv ${SOURCE_FOLDER}/Open-ILS/examples/opensrf_core.xml.example ${SOURCE_FOLDER}/Open-ILS/examples/opensrf_core.xml.evergreen.example
+
+
+#mkdir -p ${SOURCE_FOLDER}/debian/evergreen-ils/etc/apache2/sites-available
+#cp -Rv ${SOURCE_FOLDER}/Open-ILS/examples/apache/eg.conf       ${SOURCE_FOLDER}/debian/evergreen-ils/etc/apache2/sites-available/
+#cp -Rv ${SOURCE_FOLDER}/Open-ILS/examples/apache/eg_vhost.conf ${SOURCE_FOLDER}/debian/evergreen-ils/etc/apache2/
+#cp -Rv ${SOURCE_FOLDER}/Open-ILS/examples/apache/startup.pl    ${SOURCE_FOLDER}/debian/evergreen-ils/etc/apache2/
+
+#fix apxs2 install stuff
+APACHE_CONF=${DEST_ROOT}/etc/apache2/
+APACHE_MODS=${DEST_ROOT}/usr/lib/apache2/modules/
+#mkdir -pv $APACHE_CONF
+#mkdir -pv $APACHE_MODS
+#mkdir -pv ${DEST_ROOT}/etc/apache2/mods-available
+
+#APXS2 tries to install the mods in the final destination on *this* system, (/etc/apache2...) We need to override this to go into the <build>/debian/evergreen-ils/etc... folder.
+#We fix the .load files apxs2 creates in postinst or rules.
+APACHE_IN=${SOURCE_FOLDER}/Open-ILS/src/apachemods/Makefile.in
+APACHE_AM=${SOURCE_FOLDER}/Open-ILS/src/apachemods/Makefile.am
+sed -i "s^(APXS2) -i -a @srcdir@/mod_xmlent.la^(APXS2) -S LIBEXECDIR='$APACHE_MODS' -S SYSCONFDIR='$APACHE_CONF' -i -a @srcdir@/mod_xmlent.la^g" ${APACHE_IN}
+sed -i "s^(APXS2) -i -a @srcdir@/mod_xmlent.la^(APXS2) -S LIBEXECDIR='$APACHE_MODS' -S SYSCONFDIR='$APACHE_CONF' -i -a @srcdir@/mod_xmlent.la^g" ${APACHE_AM}
+sed -i "s^(APXS2) -i -a @srcdir@/mod_idlchunk.la^(APXS2) -S LIBEXECDIR='$APACHE_MODS' -S SYSCONFDIR='$APACHE_CONF' -i -a @srcdir@/mod_idlchunk.la^g" ${APACHE_IN}
+sed -i "s^(APXS2) -i -a @srcdir@/mod_idlchunk.la^(APXS2) -S LIBEXECDIR='$APACHE_MODS' -S SYSCONFDIR='$APACHE_CONF' -i -a @srcdir@/mod_idlchunk.la^g" ${APACHE_AM}
+
+#fix apache .load path screwups
+
+###TODO: not sure if this is necessary anymore. I think we do this in rules or postinst now.
+#echo "LoadModule xmlent_module      /usr/lib/apache2/modules/mod_xmlent.so" > "${DEST_ROOT}/etc/apache2/mods-available/xmlent.load"
+
+
+#copy support scripts into openils/bin since /home/opensrf/<src> isn't available anymore
+mkdir -p "${DEST_ROOT}${EVERGREEN_PREFIX}/bin"
+mkdir -p "${DEST_ROOT}${EVERGREEN_PREFIX}/share/doc/examples/"
+cp -rv ${SOURCE_FOLDER}/Open-ILS/src/support-scripts/* "${DEST_ROOT}${EVERGREEN_PREFIX}/bin/"
+cp -rv ${SOURCE_FOLDER}/Open-ILS/src/sql "${DEST_ROOT}${EVERGREEN_PREFIX}/share/doc/examples/"
+
+
+
+#eg_db_config.pls is expecting certain relative paths. Since we no longer operate from /home/opensrf/<src> we need to make minor tweaks.
+sed -i "s^../extras/eg_config^eg_config^g" ${DEST_ROOT}/openils/bin/eg_db_config.pl
+#one sed to rule them all
+sed -i "s^../sql/Pg/^../share/doc/examples/sql/Pg/^g" ${DEST_ROOT}/openils/bin/eg_db_config.pl
+#sed -i "s^../sql/Pg/build-db.sh^../share/doc/examples/sql/Pg/build-db.sh^g" ${DEST_ROOT}/openils/bin/eg_db_config.pl
+#sed -i "s^./../sql/Pg/create_database_9_1.sql
+
+#TODO: Not sure this should be even in this package. Move to libdbi?
+mkdir -p ${DEST_ROOT}/etc/ld.so.conf.d
+echo "/usr/lib/dbd" > ${DEST_ROOT}/etc/ld.so.conf.d/eg.conf
+
+
+
+echo
+echo "Source Folder is: ${SOURCE_FOLDER}"
+sleep 3
+BuildPackage
+
+cd $WORKDIR
+

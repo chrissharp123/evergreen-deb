@@ -1,0 +1,47 @@
+#!/usr/bin/make -f
+# -*- makefile -*-
+# Sample debian/rules that uses debhelper.
+# This file was originally written by Joey Hess and Craig Small.
+# As a special exception, when this file is copied by dh-make into a
+# dh-make output file, you may use that output file without restriction.
+# This special exception was added by Craig Small in version 0.37 of dh-make.
+
+# Uncomment this to turn on verbose mode.
+export DH_VERBOSE=1
+INSTALL_FOLDER=debian/evergreen-ils
+INSTALL_WEB=/openils/var/web
+STAFF_BUILD=pines_rel_2_3_4
+%:
+	dh $@ 
+override_dh_auto_configure:
+	ldconfig
+	./configure --prefix=/openils --sysconfdir=/openils/conf
+
+override_dh_auto_install:
+	#make -j1 DESTDIR=$(shell pwd)/$(INSTALL_FOLDER) WEBDIR="$(INSTALL_WEB)" STAFF_CLIENT_BUILD_ID=$(STAFF_BUILD) install
+	make -j1 DESTDIR=$(shell pwd)/$(INSTALL_FOLDER) WEBDIR="$(INSTALL_WEB)" STAFF_CLIENT_STAMP_ID=$(STAFF_BUILD) install
+	cd $(INSTALL_FOLDER)$(INSTALL_WEB)/xul && ln -s $(STAFF_BUILD)/server server
+
+override_dh_usrlocal:
+	#Skiping dh_usrlocal
+
+override_dh_prep:
+	rm -f debian/evergreen-ils.substvars
+	rm -f debian/evergreen-ils.*.debhelper
+	#stuff for apache since debian/evergreen-ils gets blown away
+	mkdir -p debian/evergreen-ils/usr/lib/apache2/modules/
+	mkdir -p debian/evergreen-ils/etc/apache2/mods-available/
+	mkdir -p debian/evergreen-ils/etc/apache2/sites-available
+	cp -Rv Open-ILS/examples/apache/eg.conf       debian/evergreen-ils/etc/apache2/sites-available/
+	cp -Rv Open-ILS/examples/apache/eg_vhost.conf debian/evergreen-ils/etc/apache2/
+	cp -Rv Open-ILS/examples/apache/startup.pl    debian/evergreen-ils/etc/apache2/
+
+override_dh_install:
+	cp -r Open-ILS/src/extras/eg_config debian/evergreen-ils/openils/bin
+	cp -r Open-ILS/src/extras/eg_config debian/evergreen-ils/openils/conf
+	echo "LoadModule xmlent_module      /usr/lib/apache2/modules/mod_xmlent.so" > "debian/evergreen-ils/etc/apache2/mods-available/xmlent.load"
+	echo "LoadModule idlchunk_module    /usr/lib/apache2/modules/mod_idlchunk.so" > "debian/evergreen-ils/etc/apache2/mods-available/idlchunk.load"
+
+override_dh_shlibdeps:
+	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info
+
